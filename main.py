@@ -1,11 +1,12 @@
-import sys
 import os
+import sys
+
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from dotenv import load_dotenv
 
-from prompts import system_prompt
 from call_function import available_functions, call_function
+from prompts import system_prompt
 
 
 def main():
@@ -35,7 +36,14 @@ def main():
         types.Content(role="user", parts=[types.Part(text=user_prompt)]),
     ]
 
-    generate_content(client, messages, verbose)
+    for _ in range(20):
+        try:
+            done = generate_content(client, messages, verbose)
+            if done:
+                print(done)
+                break
+        except Exception as e:
+            return f"Error: calling model: {e}"
 
 
 def generate_content(client, messages, verbose):
@@ -50,16 +58,33 @@ def generate_content(client, messages, verbose):
         print("Prompt tokens:", response.usage_metadata.prompt_token_count)
         print("Response tokens:", response.usage_metadata.candidates_token_count)
 
+    for candidate in response.candidates:
+        messages.append(candidate.content)
+
     if not response.function_calls:
         return response.text
 
     for function_call_part in response.function_calls:
-        function_call_result = call_function(function_call_part=function_call_part, verbose=verbose)
+        function_call_result = call_function(
+            function_call_part=function_call_part, verbose=verbose
+        )
         call_response = function_call_result.parts[0].function_response.response
         if not call_response:
             raise Exception("No response was gotten from the function call")
         if verbose:
             print(call_response)
+        tool_msg = types.Content(
+            role="user",
+            parts=[
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        name=function_call_part.name,
+                        response=call_response,
+                    )
+                )
+            ],
+        )
+        messages.append(tool_msg)
 
 
 if __name__ == "__main__":
